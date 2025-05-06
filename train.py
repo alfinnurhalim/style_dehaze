@@ -11,22 +11,33 @@ from model.trainers.trainer import Trainer
 from dataset.dataset_RESIDE import ImagePairDataset
 from logger import TrainingLogger
 
-code_name = 'Dataset_RESIDE'
+code_name = 'Dataset_DENSE'
 root_dir = f'./dataset/{code_name}'
 cfg_path = f'./config/{code_name}.yaml'
 
-train_dataset_mixed = ImagePairDataset(root_dir=root_dir, phase='train',steps=30, mix=False)
-test_dataset_mixed = ImagePairDataset(root_dir=root_dir, phase='test', steps=10, mix=True)
+args = get_config(cfg_path)
+args['cfg_path'] = cfg_path
+
+keep_ratio = args['keep_ratio']
+resume = args['resume']
+img_size = (args['img_h'],args['img_w']) #OpenCV
+
+train_dataset_mixed = ImagePairDataset(root_dir=root_dir, 
+                                        phase='train',
+                                        steps=30 ,
+                                        img_size=img_size, 
+                                        mix=False)
+
+test_dataset_mixed = ImagePairDataset(root_dir=root_dir, 
+                                        phase='test', 
+                                        steps=10 ,
+                                        img_size=img_size,
+                                        mix=True)
 
 print(f'\n\nTrain Dataset : {len(train_dataset_mixed)}')
 print(f'Test Dataset : {len(test_dataset_mixed)}\n\n')
 train_loader_mixed = DataLoader(train_dataset_mixed, batch_size=1, shuffle=True, num_workers=2)
 test_loader_mixed = DataLoader(test_dataset_mixed, batch_size=1, shuffle=False, num_workers=2)
-
-args = get_config(cfg_path)
-args['cfg_path'] = cfg_path
-keep_ratio = args['keep_ratio']
-resume = args['resume']
 
 print(resume)
 print('Using ratio of', args['keep_ratio'])
