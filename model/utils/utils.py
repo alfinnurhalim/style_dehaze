@@ -3,7 +3,7 @@ import os
 import torch
 
 def get_config(config):
-    config = os.path.join('../',config)
+    # config = os.path.join('../',config)
     with open(config, 'r') as stream:
         return yaml.load(stream, Loader=yaml.Loader)
 

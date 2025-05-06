@@ -55,7 +55,7 @@ class ImagePairDataset(Dataset):
             transforms.Lambda(lambda img: img.rotate(random.choice([0, 90, 180, 270]))),
             transforms.ToTensor()
         ])
-
+        
     def __len__(self):
         return len(self.cloudy_files)
 

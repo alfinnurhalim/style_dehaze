@@ -2,18 +2,20 @@ job_name: Dataset_RESIDE
 
 output: ./output/
 
-vgg: /content/drive/MyDrive/StyleFlow_DL/weight/vgg_normalised.pth
+vgg: ./model/vgg_normalised.pth
 
-resume: None
+resume: 
 
 #============ Net Architecture ============
 n_flow: 10
 
 n_block: 2
 
+no_lu: False
 
+affine: False
 #============ Training ============
-batch_size: 2
+batch_size: 1
 
 lr: 0.0001
 
@@ -30,10 +32,12 @@ total_epoch: 9000
 
 style_weight: 0.8
 
-content_weight: 1
+content_weight: 0.5
 
 recon_weight: 1
 
-keep_ratio : 0.8
+smooth_weight: 2
+
+keep_ratio : 0.7
 
 loss: tv_loss

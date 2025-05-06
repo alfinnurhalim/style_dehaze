@@ -2,6 +2,7 @@ import random
 import numpy as np
 import os
 import cv2
+import shutil
 
 import torch
 import torch.nn as nn
@@ -10,7 +11,7 @@ from torchvision.utils import save_image
 import model.network.net as net
 from model.network.glow import Glow
 from model.utils.utils import IterLRScheduler, remove_prefix
-from model.layers.activation import calc_mean_std
+from model.layers.activation_norm import calc_mean_std
 from model.losses.tv_loss import TVLoss
 
 import logger
@@ -99,6 +100,8 @@ class Trainer:
         for path in [self.model_log_path, self.img_log_path, self.img_test_path, self.img_att_path]:
             os.makedirs(path, exist_ok=True)
 
+        shutil.copy(cfg['cfg_path'],os.path.join(self.log_path, os.path.basename(cfg['cfg_path'])))
+
     def load_model(self, checkpoint_path):
         ckpt = torch.load(checkpoint_path)
         self.model.load_state_dict(remove_prefix(ckpt['state_dict'], 'module.'))
@@ -125,7 +128,7 @@ class Trainer:
         loss_c = loss_c.mean() * self.cfg.get('content_weight', 1.0)
         loss_s = loss_s.mean() * self.cfg.get('style_weight', 1e-4)
         loss_r = loss_r.mean() * self.cfg.get('recon_weight', 1.0)
-        loss_smooth = 
+        loss_smooth = loss_smooth * self.cfg.get('smooth_weight', 1.0)
 
         total_loss = loss_c + loss_s + loss_r + loss_smooth
 
