@@ -1,0 +1,39 @@
+job_name: Dataset_RESIDE
+
+output: ./output/
+
+vgg: /content/drive/MyDrive/StyleFlow_DL/weight/vgg_normalised.pth
+
+resume: None
+
+#============ Net Architecture ============
+n_flow: 10
+
+n_block: 2
+
+
+#============ Training ============
+batch_size: 2
+
+lr: 0.0001
+
+lr_decay: 0.00005
+
+lr_steps: [40000,80000,120000]
+
+lr_mults: 0.5
+
+total_epoch: 9000
+
+
+#============ Loss ============
+
+style_weight: 0.8
+
+content_weight: 1
+
+recon_weight: 1
+
+keep_ratio : 0.8
+
+loss: tv_loss
