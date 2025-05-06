@@ -19,13 +19,14 @@ def get_root_name(filename):
     return base_name
 
 class ImagePairDataset(Dataset):
-    def __init__(self, root_dir, phase, steps=500, mix=False):
+    def __init__(self, root_dir, phase, steps=500, mix=False, img_size=(256,256)):
         super().__init__()
         self.root_dir = root_dir
         self.phase = phase
         self.steps = steps
         self.mix = mix
 
+        self.img_size = img_size
         self.cloudy_dir = os.path.join(root_dir, f"{phase}A")
         self.clear_dir = os.path.join(root_dir, f"{phase}B")
 
@@ -44,18 +45,18 @@ class ImagePairDataset(Dataset):
         }
 
         self.final_transform = transforms.Compose([
-            transforms.Resize((256, 256)),
+            transforms.Resize(self.img_size),
             transforms.ToTensor()
         ])
 
         self.augment_transform = transforms.Compose([
-            transforms.Resize((256, 256)),
+            transforms.Resize(self.img_size),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             transforms.Lambda(lambda img: img.rotate(random.choice([0, 90, 180, 270]))),
             transforms.ToTensor()
         ])
-        
+
     def __len__(self):
         return len(self.cloudy_files)
 
