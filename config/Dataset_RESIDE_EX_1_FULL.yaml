@@ -1,0 +1,53 @@
+job_name: Dataset_RESIDE_EX_1_delta_FULL_RESUME
+
+output: ./output/
+
+vgg: ./vgg_normalised.pth
+
+resume: /content/drive/MyDrive/TESIS/style_dehaze/output/Dataset_RESIDE_EX_1_delta_FULL_100_6_2/model_save/step_0.pth.tar
+
+wandb: fa5289824c208d5c7089991c89e113eb4021a084
+
+#============ Net Architecture ============
+img_w: 256
+
+img_h: 256
+
+n_flow: 6
+
+n_block: 2
+
+no_lu: False
+
+affine: False
+
+attention: CBAM
+
+#============ Training ============
+batch_size: 10
+
+lr: 0.0002 
+
+lr_decay: 0.00005
+
+lr_steps: [70, 90]
+
+lr_mults: 0.5
+
+total_epoch: 120
+
+eval: [train,test]
+
+#============ Loss ============
+
+style_weight: 0.3
+
+content_weight: 0.1
+
+recon_weight: 0.3
+
+smooth_weight: 0.1
+
+p_weight: 2
+
+loss: tv_loss 
