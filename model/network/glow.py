@@ -3,8 +3,10 @@ from torch import nn
 from torch.nn import functional as F
 
 from model.layers import InvConv2dLU,InvConv2d,ZeroConv2d
-from model.layers.activation_norm import SAN,ActNorm,AdaIN,AdaIN_SET
-from model.layers.attention import SpatialAttention
+from model.layers.modulation import SelfConditionedModulation
+from model.layers.activation_norm import ActNorm
+from model.layers.CBAM import CBAM
+# from model.layers.attention import SpatialAttention
 
 class AffineCoupling(nn.Module):
     def __init__(self, in_channel, filter_size=512, affine=True):
@@ -88,25 +90,20 @@ class Flow(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, in_channel, n_flow, affine=True, conv_lu=True):
+    def __init__(self, in_channel, n_flow, squeeze=4, affine=True, conv_lu=True):
         super(Block,self).__init__()
 
         # print('the in channel:',in_channel)
-        squeeze_dim = in_channel * 4
-        self.san = SAN(squeeze_dim,squeeze_dim)
-        self.adain_set = AdaIN_SET()
+        squeeze_dim = in_channel * squeeze
         self.flows = nn.ModuleList()
-        self.attn = SpatialAttention(squeeze_dim)
+        self.attn = CBAM(squeeze_dim, reduction=squeeze)
+        self.modulate = SelfConditionedModulation(squeeze_dim)
 
         self.last_attention = None
 
         for i in range(n_flow):
             self.flows.append(Flow(squeeze_dim, affine=affine, conv_lu=conv_lu))
         
-        # print('\n Block for',in_channel)
-        # for name, param in self.attn.named_parameters():
-        #     print(name, param.shape)
-
     def forward(self, input):
         b_size, n_channel, height, width = input.shape
         
@@ -119,25 +116,19 @@ class Block(nn.Module):
 
         return out
 
-    def reverse(self, output, style, alpha=True):
+    def reverse(self, output, alpha=True):
         input = output
 
-        # 1. Get style modulation parameters
-        mean, std = self.san(input, style)
-
-        # 2. Get attention map if enabled
         if alpha:
             attn_map = self.attn(input)  # [B, 1, H, W]
         else:
             attn_map = None
 
-        # 3. AdaIN with optional spatial attention blending
-        input = self.adain_set(input, mean, std, alpha=attn_map)
-
         if alpha and attn_map is not None:
           self.last_attention = attn_map.detach().cpu()
 
-        # 4. Reverse through flow layers
+        input = self.modulate(input)
+
         for flow in reversed(self.flows):
             input = flow.reverse(input)
 
@@ -150,23 +141,24 @@ class Block(nn.Module):
         return unsqueezed
 
 class Glow(nn.Module):
-    def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True):
+    def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True, alpha=True):
         super(Glow,self).__init__()
-
+        
+        self.alpha = alpha
         self.blocks = nn.ModuleList()
         n_channel = in_channel
         for i in range(n_block - 1):
             self.blocks.append(Block(n_channel, n_flow, affine=affine, conv_lu=conv_lu))
             n_channel *= 4
-            
+        
         self.blocks.append(Block(n_channel, n_flow, affine=affine))
         
         
-    def forward(self, input, forward=True, style=None):
+    def forward(self, input, forward=True):
         if forward:
             return self._forward_set(input)
         else:
-            return self._reverse_set(input, style=style)
+            return self._reverse_set(input)
 
     def _forward_set(self, input):
         z = input
@@ -175,11 +167,8 @@ class Glow(nn.Module):
             z = block(z)
         return z
 
-    def _reverse_set(self, z, style):
+    def _reverse_set(self, z):
         out = z
         for i, block in enumerate(self.blocks[::-1]):
-            out = block.reverse(out,style)
+            out = block.reverse(out,alpha=self.alpha)
         return out
-
-
-

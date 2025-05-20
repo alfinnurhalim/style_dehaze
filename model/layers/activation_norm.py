@@ -110,7 +110,7 @@ class AdaIN_SET(nn.Module):
             alpha = torch.sigmoid(alpha)  # [B, 1, H, W]
             alpha = alpha.expand_as(stylized)
             return alpha * stylized + (1 - alpha) * content
-
+            
         return stylized
   
 class ActNorm(nn.Module):

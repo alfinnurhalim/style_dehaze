@@ -19,19 +19,18 @@ def get_root_name(filename):
     return base_name
 
 class ImagePairDataset(Dataset):
-    def __init__(self, root_dir, phase, steps=500, mix=False, img_size=(256,256)):
+    def __init__(self, root_dir, phase, img_size=(256,256), evaluate=False, suffix =''):
         super().__init__()
         self.root_dir = root_dir
         self.phase = phase
-        self.steps = steps
-        self.mix = mix
-
+        self.evaluate = evaluate
+        
         self.img_size = img_size
-        self.cloudy_dir = os.path.join(root_dir, f"{phase}A")
-        self.clear_dir = os.path.join(root_dir, f"{phase}B")
+        self.hazy_dir = os.path.join(root_dir, f"{phase}A" + suffix)
+        self.clear_dir = os.path.join(root_dir, f"{phase}B" + suffix)
 
-        self.cloudy_files = sorted([
-            f for f in os.listdir(self.cloudy_dir)
+        self.hazy_files = sorted([
+            f for f in os.listdir(self.hazy_dir)
             if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tif', '.bmp'))
         ])
 
@@ -56,35 +55,31 @@ class ImagePairDataset(Dataset):
             transforms.Lambda(lambda img: img.rotate(random.choice([0, 90, 180, 270]))),
             transforms.ToTensor()
         ])
+        
 
     def __len__(self):
-        return len(self.cloudy_files)
+        return len(self.hazy_files)
 
     def __getitem__(self, idx):
-        cloudy_name = self.cloudy_files[idx]
-        cloudy_path = os.path.join(self.cloudy_dir, cloudy_name)
-        root_name = get_root_name(cloudy_name)
+        hazy_name = self.hazy_files[idx]
+        hazy_path = os.path.join(self.hazy_dir, hazy_name)
+        root_name = get_root_name(hazy_name)
 
         if root_name not in self.clear_dict:
             raise ValueError(f"No matching clear image found for root='{root_name}'.")
 
-        if self.mix:
-          rand_idx = random.randint(0,len(self.cloudy_files)-1)
-          root_name_mix = get_root_name(self.cloudy_files[rand_idx])
-          clear_name = self.clear_dict[root_name_mix]
-        else:
-          clear_name = self.clear_dict[root_name]
-        clear_path = os.path.join(self.clear_dir, clear_name)
-
         gt_name = self.clear_dict[root_name]
         gt_path = os.path.join(self.clear_dir, gt_name)
 
-        cloudy_img = Image.open(cloudy_path).convert("RGB")
-        clear_img = Image.open(clear_path).convert("RGB")
+        hazy_img = Image.open(hazy_path).convert("RGB")
         gt_img = Image.open(gt_path).convert("RGB")
-
-        return (
-            self.final_transform(cloudy_img),
-            self.final_transform(clear_img),
+        
+        output = (
+            self.final_transform(hazy_img),
             self.final_transform(gt_img)
         )
+
+        if self.evaluate:
+          output = output + (hazy_name,)
+
+        return output

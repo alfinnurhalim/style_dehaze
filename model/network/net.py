@@ -11,38 +11,6 @@ def calc_mean_std(feat, eps=1e-5):
     feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C, 1, 1)
     return feat_mean, feat_std
 
-decoder = nn.Sequential(
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(512, 256, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='bilinear'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 256, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(256, 128, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='bilinear'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 128, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(128, 64, (3, 3)),
-    nn.ReLU(),
-    nn.Upsample(scale_factor=2, mode='bilinear'),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 64, (3, 3)),
-    nn.ReLU(),
-    nn.ReflectionPad2d((1, 1, 1, 1)),
-    nn.Conv2d(64, 3, (3, 3)),
-)
-
 vgg = nn.Sequential(
     nn.Conv2d(3, 3, (1, 1)),
     nn.ReflectionPad2d((1, 1, 1, 1)),
@@ -99,7 +67,7 @@ vgg = nn.Sequential(
     nn.ReLU()  # relu5-4
 )
 
-def weighted_mse_loss_merge(input_mean, target_mean, input_std, target_std, keep_ratio):
+def weighted_mse_loss_merge(input_mean, target_mean, input_std, target_std, keep_ratio=1):
     loss_mean = ((input_mean - target_mean) ** 2)
     sort_loss_mean,idx = torch.sort(loss_mean,dim=1)
 
@@ -111,7 +79,7 @@ def weighted_mse_loss_merge(input_mean, target_mean, input_std, target_std, keep
     return sort_loss_mean.mean(),loss_std.mean()
 
 class Net(nn.Module):
-    def __init__(self, encoder, keep_ratio=1.0):
+    def __init__(self, encoder):
         super(Net, self).__init__()
         enc_layers = list(encoder.children())
         self.enc_1 = nn.Sequential(*enc_layers[:4])  # input -> relu1_1
@@ -120,8 +88,7 @@ class Net(nn.Module):
         self.enc_4 = nn.Sequential(*enc_layers[18:31])  # relu3_1 -> relu4_1 31
 
         self.mse_loss = nn.MSELoss()
-        self.keep_ratio = keep_ratio
-
+        
         # fix the encoder
         for name in ['enc_1', 'enc_2', 'enc_3', 'enc_4']:
             for param in getattr(self, name).parameters():
@@ -135,12 +102,20 @@ class Net(nn.Module):
             results.append(func(results[-1]))
         return results[1:]
 
-    # extract relu4_1 from input image
     def encode(self, input):
         for i in range(4):
             input = getattr(self, 'enc_{:d}'.format(i + 1))(input)
         return input
 
+    def calc_style_loss(self, input, target):
+        assert (input.size() == target.size())
+        assert (target.requires_grad is False)
+        input_mean, input_std = calc_mean_std(input)
+        target_mean, target_std = calc_mean_std(target)
+
+        loss_mean,loss_std = weighted_mse_loss_merge(input_mean,target_mean,input_std,target_std)
+        return loss_mean+loss_std
+    
     def calc_content_loss(self, input, target):
         assert (input.size() == target.size())
         assert (target.requires_grad is False)
@@ -155,45 +130,41 @@ class Net(nn.Module):
 
         return self.mse_loss(normalized_feat1, normalized_feat2)
 
-    def calc_style_loss(self, input, target):
-        assert (input.size() == target.size())
-        assert (target.requires_grad is False)
-        input_mean, input_std = calc_mean_std(input)
-        target_mean, target_std = calc_mean_std(target)
+    def gram_matrix(self, feat):
+        B, C, H, W = feat.size()
+        feat = feat.view(B, C, H * W)
+        gram = torch.bmm(feat, feat.transpose(1, 2)) / (C * H * W)
+        return gram
 
-        loss_mean,loss_std = weighted_mse_loss_merge(input_mean,target_mean,input_std,target_std,self.keep_ratio)
-        return loss_mean+loss_std
+    def forward(self, content_images, stylized_images, gt_images, weight=None):
 
-    def cat_tensor(self,img):
-        feat = self.encode_with_intermediate(img)
-        mean,std = calc_mean_std(feat[0])
-        mean = mean.squeeze(2)
-        mean = mean.squeeze(2)
-        std = std.squeeze(2)
-        std = std.squeeze(2)
-        t = torch.cat([mean,std],dim=1)
-        for i in range(1,len(feat)):
-            mean,std = calc_mean_std(feat[i])
-            mean = mean.squeeze(2)
-            mean = mean.squeeze(2)
-            std = std.squeeze(2)
-            std = std.squeeze(2)
-            t = torch.cat([t,mean,std],dim=1)
-        return t
-
-    def forward(self, content_images, style_images, stylized_images, gt_images, weight=None):
-        style_feats = self.encode_with_intermediate(style_images)
-        content_feat = self.encode(content_images)
+        # Encode layer by layer
         stylized_feats = self.encode_with_intermediate(stylized_images)
-        gt_feats = self.encode(gt_images)
+        gt_feats = self.encode_with_intermediate(gt_images)
 
-        loss_c = self.calc_content_loss(stylized_feats[-1], content_feat)
-        # loss_c = self.calc_content_loss(stylized_feats[-1], gt_feats)
-        loss_s = self.calc_style_loss(stylized_feats[0], style_feats[0])
-        loss_r = F.l1_loss(stylized_images, gt_images)
+        # Structure Loss
+        # loss_r = torch.zeros_like(loss_p)
+        loss_r = self.calc_content_loss(stylized_feats[-1], gt_feats[-1])
+
+        # Preserving structure between Output anf Input
+        loss_c = 0
+        for i in range(4):
+            loss_c += F.mse_loss(stylized_feats[i], gt_feats[i])
         
+        # Stle Loss
+        loss_s = 0
+        for i in range(4):
+            loss_s += self.calc_style_loss(stylized_feats[i], gt_feats[i])
 
-        for i in range(1, 4):
-            loss_s += self.calc_style_loss(stylized_feats[i], style_feats[i])
+        # loss gram
+        # loss_s = 0
+        # for i in range(4): 
+        #     gram_s = self.gram_matrix(stylized_feats[i])
+        #     gram_gt = self.gram_matrix(gt_feats[i])
+        #     loss_s += F.mse_loss(gram_s, gram_gt)
 
-        return loss_c, loss_s, loss_r
+        # Evaluating the output vs GT
+        loss_p = F.mse_loss(stylized_images,gt_images)
+
+      
+        return loss_c, loss_s, loss_r, loss_p

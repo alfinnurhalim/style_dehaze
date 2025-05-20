@@ -14,25 +14,3 @@ class SpatialAttention(nn.Module):
 
     def forward(self, x):
         return self.attn(x)
-
-
-
-'''
-Yes — it’s intentionally shallow.
-And here's why:
-
-✅ Why It's Typically Shallow
-This comes from CBAM (Convolutional Block Attention Module) [Woo et al., ECCV 2018].
-
-They found that a single conv layer is enough to capture coarse attention patterns without introducing instability or overfitting.
-
-Shallow attention is:
-
-Fast and light
-
-Easy to integrate into deep architectures
-
-Surprisingly effective for many tasks
-
-
-'''
