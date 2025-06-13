@@ -50,20 +50,6 @@ def get_gradients_loss(I, R):
         grad_y * torch.exp(-10 * avg_pool(R_gray, 'y'))
     )
 
-class Refiner(nn.Module):
-    def __init__(self, in_channels=3):
-        super(Refiner, self).__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, in_channels, kernel_size=3, padding=1)
-        )
-
-    def forward(self, x):
-        return x + self.net(x)  # Residual refinement
-
 class merge_model(nn.Module):
     def __init__(self, cfg):
         super(merge_model, self).__init__()
@@ -83,6 +69,26 @@ class merge_model(nn.Module):
 
         # stylized = self.refiner(stylized)
         return stylized
+
+    def freeze_flow_train_modulation(self):
+        print("\n🔒 Freezing all parameters...")
+        for param in self.glow.parameters():
+            param.requires_grad = False
+
+        print("🔓 Unfreezing modulation parameters...\n")
+        for block_idx, block in enumerate(self.glow.blocks):
+            for name, module in block.named_children():
+                if name in ['modulate', 'channel_attn', 'spatial_attn']:
+                    for param_name, param in module.named_parameters(recurse=True):
+                        param.requires_grad = True
+                        print(f"✅ Unfroze: glow.blocks[{block_idx}].{name}.{param_name}")
+
+        print("\n🧾 Parameter Summary (after freeze/unfreeze):")
+        for name, param in self.named_parameters():
+            status = "✅ Trainable" if param.requires_grad else "❌ Frozen"
+            print(f"{status:<12} | {name}")
+        print()
+
 
 
 class Trainer:
@@ -124,12 +130,38 @@ class Trainer:
 
         shutil.copy(cfg['cfg_path'],os.path.join(self.log_path, os.path.basename(cfg['cfg_path'])))
 
-    def load_model(self, checkpoint_path):
-        ckpt = torch.load(checkpoint_path)
-        self.model.load_state_dict(remove_prefix(ckpt['state_dict'], 'module.'))
-        self.optimizer.load_state_dict(ckpt['optimizer'])
+    def load_model(self, checkpoint_path, flow_only=False):
+        ckpt = torch.load(checkpoint_path, map_location='cpu')
+        full_state = remove_prefix(ckpt['state_dict'], 'module.')
 
-        print(f'\n\n{checkpoint_path} model loaded sucessfully\n\n')
+        if flow_only:
+            print(f"\nLoading FLOW-only weights from: {checkpoint_path}")
+            # Filter out only flow-relevant keys
+            filtered_state = {
+                k: v for k, v in full_state.items()
+                if any([
+                    '.flows.' in k,
+                    '.actnorm' in k,
+                    '.invconv' in k,
+                    '.coupling' in k
+                ])
+            }
+            # Load into model with missing keys allowed
+            missing, unexpected = self.model.load_state_dict(filtered_state, strict=False)
+
+            print("Loaded FLOW weights only.")
+            print(f"Missing keys: {len(missing)}")
+            print(f"Unexpected keys: {len(unexpected)}\n")
+        else:
+            # Load entire model
+            self.model.load_state_dict(full_state)
+            print(f"\nLoaded full model weights from: {checkpoint_path}\n")
+
+        # Load optimizer only if full model is restored
+        if not flow_only and 'optimizer' in ckpt:
+            self.optimizer.load_state_dict(ckpt['optimizer'])
+            print("Optimizer state loaded\n")
+
 
     def train(self, batch_id, content_imgs, gt_imgs, epoch):
         content = content_imgs.cuda()
@@ -142,14 +174,29 @@ class Trainer:
         loss_smooth = self.tv_loss(stylized)
 
         loss_c, loss_s, loss_r, loss_p = self.encoder(content, stylized, gt)
+        # loss_p = self.encoder(content, stylized, gt)
+        
+        # stage 1 loss
+        loss_scm = 0.0
+        for block in self.model.glow.blocks:
+          if hasattr(block, 'last_delta_mu') and block.last_delta_mu is not None:
+              delta_mu = block.last_delta_mu
+              delta_std = block.last_delta_std
+
+              # L2 regularization to push deltas toward zero
+              loss_mu = (delta_mu ** 2).mean()
+              loss_std = (delta_std ** 2).mean()
+              loss_scm += (loss_mu + loss_std)
 
         loss_c = loss_c.mean() * self.cfg.get('content_weight', 1.0)
         loss_s = loss_s.mean() * self.cfg.get('style_weight', 1e-4)
         loss_r = loss_r.mean() * self.cfg.get('recon_weight', 1.0)
         loss_p = loss_p.mean() * self.cfg.get('p_weight', 1.0)
         loss_smooth = loss_smooth * self.cfg.get('smooth_weight', 1.0)
+        loss_scm = loss_scm * self.cfg.get('scm_weight', 0.05)
 
-        total_loss = loss_c + loss_s + loss_r + loss_p + loss_smooth
+        total_loss = loss_c + loss_s + loss_r + loss_p + loss_smooth + loss_scm
+        # total_loss = loss_p
 
         # Backpropagation
         self.optimizer.zero_grad()
@@ -174,10 +221,11 @@ class Trainer:
 
         # Checkpointing 
         if batch_id % self.cfg.get('save_freq', 500) == 0:
+            ckpt_name = self.cfg['job_name']
             save_checkpoint(
                 {'state_dict': self.model.state_dict(),
                  'optimizer': self.optimizer.state_dict()},
-                os.path.join(self.model_log_path, f"{epoch}_step_{batch_id}")
+                os.path.join(self.model_log_path, f"{ckpt_name}")
             )
 
         return [
@@ -186,7 +234,8 @@ class Trainer:
             loss_s.item(),
             loss_r.item(),
             loss_p.item(),
-            loss_smooth.item()
+            loss_smooth.item(),
+            loss_scm.item()
         ]
 
     def test(self, epoch, batch_id, content_imgs, gt_imgs, len_data=1000, suffix=''):

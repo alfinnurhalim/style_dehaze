@@ -49,16 +49,49 @@ class TrainingLogger:
         plt.close()
         print(f"Updated training graph saved at: {self.graph_path}")
 
+import numpy as np
+import cv2
+import torch
+
+import numpy as np
+import cv2
+import torch
+
+import numpy as np
+import cv2
+import torch
+
 def overlay_attention_on_image(attn_map, content_img, alpha=0.5):
     """
-    Overlays the attention heatmap on the content image.
+    Overlays attention heatmap on the content image.
+    
+    Args:
+        attn_map (Tensor): [1, 1, H, W] or [1, H, W]
+        content_img (Tensor): [3, H, W]
+    Returns:
+        overlayed image as np.uint8 array [H, W, 3]
     """
-    attn_map = attn_map.squeeze().cpu().numpy()   # [H, W]
-    attn_map = cv2.resize(attn_map, (content_img.size(2), content_img.size(1)))
-    attn_norm = (attn_map * 255).astype(np.uint8)
-    attn_color = cv2.applyColorMap(attn_norm, cv2.COLORMAP_JET)  # [H, W, 3]
+    # Step 1: Extract the attention map for the first image, squeeze to [H, W]
+    if isinstance(attn_map, torch.Tensor):
+        attn_map = attn_map[0].squeeze().detach().cpu().numpy()  # [H, W]
 
-    # Convert content to [H, W, 3] numpy
-    content_np = (content_img * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+    # Step 2: Resize to match content image
+    H, W = content_img.shape[1], content_img.shape[2]
+    attn_map = cv2.resize(attn_map, (W, H))
+
+    # Step 3: Normalize to [0, 255]
+    attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min() + 1e-5)
+    attn_map = (attn_map * 255).astype(np.uint8)  # OpenCV requires CV_8UC1
+
+    # Step 4: Apply color map
+    attn_color = cv2.applyColorMap(attn_map, cv2.COLORMAP_JET)  # [H, W, 3]
+
+    # Step 5: Convert content image to OpenCV BGR format
+    content_np = (content_img.detach().cpu().numpy() * 255).astype(np.uint8)
+    content_np = np.transpose(content_np, (1, 2, 0))  # [H, W, C]
+    content_np = cv2.cvtColor(content_np, cv2.COLOR_RGB2BGR)
+
+    # Step 6: Overlay attention on content image
     overlayed = cv2.addWeighted(content_np, 1 - alpha, attn_color, alpha, 0)
+
     return overlayed

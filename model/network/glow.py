@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from model.layers import InvConv2dLU,InvConv2d,ZeroConv2d
 from model.layers.modulation import SelfConditionedModulation
 from model.layers.activation_norm import ActNorm
-from model.layers.CBAM import CBAM
+from model.layers.CBAM import CBAM,ChannelAttention,SpatialAttention
 # from model.layers.attention import SpatialAttention
 
 class AffineCoupling(nn.Module):
@@ -96,10 +96,14 @@ class Block(nn.Module):
         # print('the in channel:',in_channel)
         squeeze_dim = in_channel * squeeze
         self.flows = nn.ModuleList()
-        self.attn = CBAM(squeeze_dim, reduction=squeeze)
-        self.modulate = SelfConditionedModulation(squeeze_dim)
+        self.modulate = SelfConditionedModulation(squeeze_dim, return_delta=True)
+
+        self.spatial_attn = SpatialAttention()
+        self.channel_attn = ChannelAttention(squeeze_dim, reduction=squeeze)
 
         self.last_attention = None
+        self.last_delta_mu = None
+        self.last_delta_std = None
 
         for i in range(n_flow):
             self.flows.append(Flow(squeeze_dim, affine=affine, conv_lu=conv_lu))
@@ -120,15 +124,31 @@ class Block(nn.Module):
         input = output
 
         if alpha:
-            attn_map = self.attn(input)  # [B, 1, H, W]
+            # Channel & spatial attention
+            ch_att = self.channel_attn(input)
+            input_attn = input * ch_att
+
+            sp_att = self.spatial_attn(input_attn)
+            input_attn = input_attn * sp_att
+
+            self.last_attention = sp_att.detach().cpu()
+
+            # Save attention mask as soft gate
+            soft_gate = sp_att  # shape: [B, 1, H, W]
         else:
-            attn_map = None
+            input_attn = input
+            soft_gate = torch.zeros_like(input[:, :1, :, :])  # dummy gate (no modulation)
 
-        if alpha and attn_map is not None:
-          self.last_attention = attn_map.detach().cpu()
+        # Apply modulation
+        mod_input, d_mean, d_var = self.modulate(input_attn,input)
 
-        input = self.modulate(input)
+        self.last_delta_mu = d_mean
+        self.last_delta_std = d_var
 
+        # Soft-gating: combine original and modulated input
+        input = input * (1 - soft_gate) + mod_input * soft_gate
+
+        # Decode through flow
         for flow in reversed(self.flows):
             input = flow.reverse(input)
 

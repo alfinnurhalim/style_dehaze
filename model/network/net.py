@@ -144,16 +144,20 @@ class Net(nn.Module):
 
         # Structure Loss
         # loss_r = torch.zeros_like(loss_p)
-        loss_r = self.calc_content_loss(stylized_feats[-1], gt_feats[-1])
+        loss_r = 0
+        for i in range(2):
+            loss_r += self.calc_content_loss(stylized_feats[i], gt_feats[i])
 
         # Preserving structure between Output anf Input
-        loss_c = 0
-        for i in range(4):
-            loss_c += F.mse_loss(stylized_feats[i], gt_feats[i])
+        # loss_c = torch.zeros_like(loss_r)
+        loss_c = 0 #torch.zeros_like(loss_r)
+        for i in range(2):
+            loss_c += F.l1_loss(stylized_feats[i], gt_feats[i])
         
         # Stle Loss
+        # loss_s = torch.zeros_like(loss_r)
         loss_s = 0
-        for i in range(4):
+        for i in range(2):
             loss_s += self.calc_style_loss(stylized_feats[i], gt_feats[i])
 
         # loss gram
@@ -164,7 +168,10 @@ class Net(nn.Module):
         #     loss_s += F.mse_loss(gram_s, gram_gt)
 
         # Evaluating the output vs GT
-        loss_p = F.mse_loss(stylized_images,gt_images)
+        loss_p = F.l1_loss(stylized_images,gt_images)
 
-      
         return loss_c, loss_s, loss_r, loss_p
+
+
+
+

@@ -9,11 +9,11 @@ from torch.utils.data import DataLoader
 
 from model.utils.utils import get_config
 from model.trainers.trainer import Trainer
-from dataset.dataset_RESIDE import ImagePairDataset
+from dataset.dataset_ImagePair import ImagePairDataset
 from logger import TrainingLogger
 
-code_name = 'Dataset_RESIDE_EX_1_2'
-root_dir = f'./dataset/Dataset_RESIDE_100'
+code_name = 'Dataset_OHAZE_BISMILLAH_FINAL'
+root_dir = f'./dataset/Dataset_OHAZE'
 cfg_path = f'./config/{code_name}.yaml'
 
 args = get_config(cfg_path)
@@ -29,7 +29,7 @@ if wandb_key is not None:
     wandb.login(key=wandb_key)
 
     wandb_run = wandb.init(
-        project="TESIS",
+        project="TESIS_CLEAN",
         entity="alfin-nurhalim",
         name=code_name,
         config=args,
@@ -37,10 +37,14 @@ if wandb_key is not None:
 
 train_dataset_mixed = ImagePairDataset(root_dir=root_dir, 
                                         phase='train',
+                                        augment=args['aug'],
+                                        stage=args['stage'],
                                         img_size=img_size)
 
 test_dataset_mixed = ImagePairDataset(root_dir=root_dir, 
-                                        phase='test', 
+                                        phase='test',
+                                        augment=False, 
+                                        stage=args['stage'],
                                         img_size=img_size)
 
 print(f'\n\nTrain Dataset : {len(train_dataset_mixed)}')
@@ -54,8 +58,12 @@ print('epoch: ',args['total_epoch'])
 print('\n\n')
 
 trainer = Trainer(args)
+
 if resume is not None:
-  trainer.load_model(resume)
+  trainer.load_model(resume,flow_only=False)
+
+# if args['stage']==2:
+#   trainer.model.freeze_flow_train_modulation()
 
 training_logger = TrainingLogger(trainer.log_path)
 
@@ -68,7 +76,7 @@ for epoch in range(args['total_epoch']):
     for batch_id, (source_image, gt_image) in progress_bar:
         loss_list = trainer.train(batch_id, source_image, gt_image, epoch)
         
-        loss,loss_c,loss_s,loss_r,loss_p,loss_smooth = loss_list if loss_list is not None else [0,0,0,0,0]
+        loss,loss_c,loss_s,loss_r,loss_p,loss_smooth,loss_scm = loss_list if loss_list is not None else [0,0,0,0,0]
 
         last_loss = loss  # Update last_loss continuously
 
@@ -80,6 +88,7 @@ for epoch in range(args['total_epoch']):
                 'train/loss_restoration': loss_r,
                 'train/loss_pixel': loss_p,
                 'train/loss_smooth': loss_smooth,
+                'train/loss_scm': loss_scm,
             },step=epoch)
 
         progress_bar.set_postfix({'Loss': f'{loss:.4f}',
@@ -87,7 +96,8 @@ for epoch in range(args['total_epoch']):
                                   'Loss_s': f'{loss_s:.4f}',
                                   'Loss_r': f'{loss_r:.4f}',
                                   'loss_p': f'{loss_p:.4f}',
-                                  'Loss_smooth': f'{loss_smooth:.4f}'})
+                                  'Loss_smooth': f'{loss_smooth:.4f}',
+                                  'loss_scm': f'{loss_scm:.4f}'})
 
     if last_loss is not None:
         training_logger.log_epoch_loss(epoch, last_loss)
