@@ -5,6 +5,8 @@ import cv2
 import shutil
 import wandb 
 
+import gdown
+
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
@@ -50,6 +52,19 @@ def get_gradients_loss(I, R):
         grad_y * torch.exp(-10 * avg_pool(R_gray, 'y'))
     )
 
+def load_vgg_weights(cfg, vgg):
+    vgg_drive_url = '15CeUI3FMgSFGSUPAldAzGAWAhMNL5iIO'
+    vgg_local_path = cfg.get('vgg')
+
+    if not vgg_local_path or not os.path.exists(vgg_local_path):
+        print("VGG model weights not found. Downloading from Google Drive...")
+        gdown.download(id=vgg_drive_url, output=vgg_local_path, quiet=False)
+
+    # Load weights into the existing model instance
+    vgg.load_state_dict(torch.load(vgg_local_path))
+    return vgg
+
+
 class merge_model(nn.Module):
     def __init__(self, cfg):
         super(merge_model, self).__init__()
@@ -90,7 +105,6 @@ class merge_model(nn.Module):
         print()
 
 
-
 class Trainer:
     def __init__(self, cfg, seed=0):
         set_random_seed(seed)
@@ -110,7 +124,8 @@ class Trainer:
         # Content encoder (VGG) & Style encoder
         # Load pretrained VGG from torchvision
         vgg = net.vgg
-        vgg.load_state_dict(torch.load(cfg['vgg']))
+        vgg = load_vgg_weights(cfg, vgg)
+
         self.encoder = net.Net(vgg).cuda()
 
         # Smoothness regularization

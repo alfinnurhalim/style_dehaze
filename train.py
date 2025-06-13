@@ -12,9 +12,11 @@ from model.trainers.trainer import Trainer
 from dataset.dataset_ImagePair import ImagePairDataset
 from logger import TrainingLogger
 
-code_name = 'Dataset_OHAZE_BISMILLAH_FINAL'
+code_name = 'Dataset_OHAZE'
 root_dir = f'./dataset/Dataset_OHAZE'
-cfg_path = f'./config/{code_name}.yaml'
+cfg_path = f'./config/Dataset_OHAZE_1_6.yaml'
+
+wandb_project = 'TESIS_CLEAN'
 
 args = get_config(cfg_path)
 args['cfg_path'] = cfg_path
@@ -29,7 +31,7 @@ if wandb_key is not None:
     wandb.login(key=wandb_key)
 
     wandb_run = wandb.init(
-        project="TESIS_CLEAN",
+        project=wandb_project,
         entity="alfin-nurhalim",
         name=code_name,
         config=args,
@@ -149,7 +151,8 @@ for epoch in range(args['total_epoch']):
                   'test/ssim': avg_ssim
               },step=epoch)
 
-    training_logger.update_graph()
+    # using wandb
+    # training_logger.update_graph()
 
     print('\n\n')
 
